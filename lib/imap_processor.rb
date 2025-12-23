@@ -171,7 +171,29 @@ class ImapProcessor
   end
 
   def get_name_from_mail
-    mail_is_mail ? @email[:from].addrs.first.display_name : @email.from[:name]
+    if mail_is_mail
+      from_address = @email[:from].addrs.first.address
+      to_address = @email.to.first
+
+      # If forwarding detected, try to extract name from Reply-To
+      if from_address.downcase == to_address.downcase && @email.reply_to.present?
+        # Parse reply-to to extract name
+        # Reply-To might be "Name <email>" or just "email"
+        reply_to_str = @email.reply_to.first
+        if reply_to_str.include?('<')
+          # Extract name from "Name <email>" format
+          name = reply_to_str.split('<').first.strip.gsub(/['"]/, '')
+          name.present? ? name : @email[:from].addrs.first.display_name
+        else
+          # Just email, fall back to FROM name
+          @email[:from].addrs.first.display_name
+        end
+      else
+        @email[:from].addrs.first.display_name
+      end
+    else
+      @email.from[:name]
+    end
   end
 
   def raw_body_from_mail
@@ -183,7 +205,20 @@ class ImapProcessor
   end
 
   def get_email_from_mail
-    mail_is_mail ? @email[:from].addrs.first.address : @email.from[:email]
+    if mail_is_mail
+      from_address = @email[:from].addrs.first.address
+      to_address = @email.to.first
+
+      # If FROM and TO are the same (email forwarding loop), use Reply-To instead
+      if from_address.downcase == to_address.downcase && @email.reply_to.present?
+        Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{@email.reply_to.first}"
+        @email.reply_to.first
+      else
+        from_address
+      end
+    else
+      @email.from[:email]
+    end
   end
 
   def get_token_from_mail
