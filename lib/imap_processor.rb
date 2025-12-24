@@ -171,68 +171,43 @@ class ImapProcessor
   end
 
   def get_name_from_mail
-    if mail_is_mail
-      from_address = @email[:from].addrs.first.address
-      to_address = @email.to&.first
+    from_address = @email[:from].addrs.first.address
+    to_address = @email.to&.first
 
-      # If forwarding detected, try to extract name from Reply-To
-      if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
-        # Get display name from Reply-To header
-        reply_to_name = @email[:reply_to]&.addrs&.first&.display_name
-        reply_to_name.present? ? reply_to_name : @email[:from].addrs.first.display_name
-      else
-        @email[:from].addrs.first.display_name
-      end
+    # If forwarding detected, try to extract name from Reply-To
+    if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
+      # Get display name from Reply-To header
+      reply_to_name = @email[:reply_to]&.addrs&.first&.display_name
+      reply_to_name.present? ? reply_to_name : @email[:from].addrs.first.display_name
     else
-      @email.from[:name]
+      @email[:from].addrs.first.display_name
     end
   end
 
   def raw_body_from_mail
-    if mail_is_mail
-      @email.multipart? ? @email.text_part.body.decoded : @email.body.decoded
-    else
-      @email.raw_body
-    end
+    @email.multipart? ? @email.text_part.body.decoded : @email.body.decoded
   end
 
   def get_email_from_mail
-    if mail_is_mail
-      from_address = @email[:from].addrs.first.address
-      to_address = @email.to&.first
+    from_address = @email[:from].addrs.first.address
+    to_address = @email.to&.first
 
-      # If FROM and TO are the same (email forwarding loop), use Reply-To instead
-      if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
-        reply_to_address = @email[:reply_to]&.addrs&.first&.address
-        Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{reply_to_address}"
-        reply_to_address
-      else
-        from_address
-      end
+    # If FROM and TO are the same (email forwarding loop), use Reply-To instead
+    if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
+      reply_to_address = @email[:reply_to]&.addrs&.first&.address
+      Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{reply_to_address}"
+      reply_to_address
     else
-      @email.from[:email]
+      from_address
     end
-  end
-
-  def get_token_from_mail
-    #this seems to only be there for griddler and co
-    @email.from[:token]
   end
 
   def get_to_from_mail
-    mail_is_mail ? @email.to[0].split('@')[0] : @email.to[0][:token]
+    @email.to[0].split('@')[0]
   end
 
   def get_content_from_mail
-    if mail_is_mail
-      @email.multipart? ? (@email.text_part ? @email.text_part.body.decoded : nil) : @email.body.decoded
-    else
-      MailExtract.new(@email.body).body
-    end
-  end
-
-  def mail_is_mail
-    @email.class.name == 'Mail::Message'
+    @email.multipart? ? (@email.text_part ? @email.text_part.body.decoded : nil) : @email.body.decoded
   end
 
 end
