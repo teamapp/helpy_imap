@@ -24,7 +24,7 @@ class ImapProcessor
 
     cc = @email.cc&.join ','
 
-    subject = @email.subject
+    subject = @email.subject || "(No Subject)"
     attachments = @email.attachments
 
     if subject.include?("[#{sitename}]") # this is a reply to an existing topic
@@ -185,7 +185,11 @@ class ImapProcessor
   end
 
   def raw_body_from_mail
-    @email.multipart? ? @email.text_part.body.decoded : @email.body.decoded
+    if @email.multipart?
+      @email.text_part ? @email.text_part.body.decoded : ""
+    else
+      @email.body.decoded
+    end
   end
 
   def get_email_from_mail
