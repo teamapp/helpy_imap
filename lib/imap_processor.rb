@@ -24,7 +24,7 @@ class ImapProcessor
 
     cc = @email.cc&.join ','
 
-    subject = @email.subject
+    subject = @email.subject || "(No Subject)"
     attachments = @email.attachments
 
     if subject.include?("[#{sitename}]") # this is a reply to an existing topic
@@ -50,9 +50,6 @@ class ImapProcessor
         @tracker.event(category: "Agent: #{topic.assigned_user.name}", action: "User Replied by Email", label: topic.to_param) unless topic.assigned_user.nil?
       end
     elsif subject.include?("Fwd: ") # this is a forwarded message DOES NOT WORK CURRENTLY
-
-      #clean message
-      # message = MailExtract.new(message).body
 
       #parse_forwarded_message(message)
       topic = Forum.first.topics.create!(
@@ -171,40 +168,47 @@ class ImapProcessor
   end
 
   def get_name_from_mail
-    mail_is_mail ? @email[:from].addrs.first.display_name : @email.from[:name]
+    from_address = @email[:from].addrs.first.address
+    to_address = @email.to&.first
+
+    # If forwarding detected, try to extract name from Reply-To
+    if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
+      # Get display name from Reply-To header
+      reply_to_name = @email[:reply_to]&.addrs&.first&.display_name
+      reply_to_name.present? ? reply_to_name : @email[:from].addrs.first.display_name
+    else
+      @email[:from].addrs.first.display_name
+    end
   end
 
   def raw_body_from_mail
-    if mail_is_mail
-      @email.multipart? ? @email.text_part.body.decoded : @email.body.decoded
+    if @email.multipart?
+      @email.text_part ? @email.text_part.body.decoded : ""
     else
-      @email.raw_body
+      @email.body.decoded
     end
   end
 
   def get_email_from_mail
-    mail_is_mail ? @email[:from].addrs.first.address : @email.from[:email]
-  end
+    from_address = @email[:from].addrs.first.address
+    to_address = @email.to&.first
 
-  def get_token_from_mail
-    #this seems to only be there for griddler and co
-    @email.from[:token]
-  end
-
-  def get_to_from_mail
-    mail_is_mail ? @email.to[0].split('@')[0] : @email.to[0][:token]
-  end
-
-  def get_content_from_mail
-    if mail_is_mail
-      @email.multipart? ? (@email.text_part ? @email.text_part.body.decoded : nil) : @email.body.decoded
+    # If FROM and TO are the same (email forwarding loop), use Reply-To instead
+    if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
+      reply_to_address = @email[:reply_to]&.addrs&.first&.address
+      Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{reply_to_address}"
+      reply_to_address
     else
-      MailExtract.new(@email.body).body
+      from_address
     end
   end
 
-  def mail_is_mail
-    @email.class.name == 'Mail::Message'
+  def get_to_from_mail
+    @email.to&.first&.split('@')&.first || 'support'
+  end
+
+  def get_content_from_mail
+    @email.multipart? ? (@email.text_part ? @email.text_part.body.decoded : nil) : @email.body.decoded
   end
 
 end
