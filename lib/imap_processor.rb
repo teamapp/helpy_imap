@@ -51,9 +51,6 @@ class ImapProcessor
       end
     elsif subject.include?("Fwd: ") # this is a forwarded message DOES NOT WORK CURRENTLY
 
-      #clean message
-      # message = MailExtract.new(message).body
-
       #parse_forwarded_message(message)
       topic = Forum.first.topics.create!(
         :name => subject,
