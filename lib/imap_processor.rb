@@ -203,7 +203,7 @@ class ImapProcessor
   end
 
   def get_to_from_mail
-    @email.to[0].split('@')[0]
+    @email.to&.first&.split('@')&.first || 'support'
   end
 
   def get_content_from_mail
