@@ -203,8 +203,9 @@ class ImapProcessor
 
       # If FROM and TO are the same (email forwarding loop), use Reply-To instead
       if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
-        Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{@email.reply_to.first}"
-        @email.reply_to.first
+        reply_to_address = @email[:reply_to]&.addrs&.first&.address
+        Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{reply_to_address}"
+        reply_to_address
       else
         from_address
       end
