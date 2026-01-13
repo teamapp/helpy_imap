@@ -42,6 +42,9 @@ class ImapProcessor
         :kind => "reply"
       )
 
+      # Send notification via the new controller-based pattern
+      PostNotificationSubscriber.notify(post) if post.persisted?
+
       # Push array of attachments and send to Cloudinary
       handle_attachments(@email, post)
 
@@ -67,6 +70,9 @@ class ImapProcessor
         :cc => cc,
         kind: 'first'
       )
+
+      # Send notification via the new controller-based pattern
+      PostNotificationSubscriber.notify(post) if post.persisted?
 
       # Push array of attachments and send to Cloudinary
       handle_attachments(@email, post)
@@ -97,6 +103,9 @@ class ImapProcessor
         :kind => "first"
       )
 
+      # Send notification via the new controller-based pattern
+      PostNotificationSubscriber.notify(post) if post.persisted?
+
       # Push array of attachments and send to Cloudinary
       handle_attachments(@email, post)
 
@@ -111,7 +120,7 @@ class ImapProcessor
   def encode_entity(entity)
     return nil if entity.nil?
     return entity unless entity.respond_to?('encoding')
-    
+
     case entity.encoding.name
     when "ASCII-8BIT"
       if entity.force_encoding("utf-8").valid_encoding?
