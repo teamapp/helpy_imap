@@ -133,21 +133,37 @@ class ImapProcessor
     end
   end
 
+  # Convert Mail::Part attachments (filename, body.decoded, mime_type) to UploadedFile objects for CarrierWave
   def handle_attachments(email, post)
-    if email.attachments.present? && cloudinary_enabled?
-      array_of_files = []
-      email.attachments.each do |attachment|
-        array_of_files << File.open(attachment.tempfile.path, 'r')
-      end
-      post.screenshots = array_of_files
-    elsif email.attachments.present?
-      post.update(
-        attachments: email.attachments
-      )
-      if post.valid?
-        post.save
-      end
+    return unless email.attachments.present?
+
+    uploaded_files = email.attachments.map do |attachment|
+      convert_mail_attachment_to_uploaded_file(attachment)
+    end.compact
+
+    return if uploaded_files.empty?
+
+    if cloudinary_enabled?
+      post.screenshots = uploaded_files
+    else
+      post.attachments = uploaded_files
     end
+    post.save
+  end
+
+  def convert_mail_attachment_to_uploaded_file(attachment)
+    extension = File.extname(attachment.filename)
+    basename = File.basename(attachment.filename, extension)
+
+    tempfile = Tempfile.new([basename, extension], binmode: true)
+    tempfile.write(attachment.body.decoded)
+    tempfile.rewind
+
+    ActionDispatch::Http::UploadedFile.new(
+      filename: attachment.filename,
+      type: attachment.mime_type,
+      tempfile: tempfile
+    )
   end
 
   def cloudinary_enabled?
