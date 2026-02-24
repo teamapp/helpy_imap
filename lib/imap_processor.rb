@@ -27,32 +27,13 @@ class ImapProcessor
     subject = @email.subject || "(No Subject)"
     attachments = @email.attachments
 
-    if subject.include?("[#{sitename}]") # this is a reply to an existing topic
-      # Fix #2: Safe navigation for string splitting
-      parts = subject.split("[#{sitename}]")
-      complete_subject = parts[1]&.strip
-
-      # Validate parseable subject format
-      if complete_subject.nil? || !complete_subject.include?("#")
-        return create_new_topic(subject, message, raw, cc)
-      end
-
-      ticket_parts = complete_subject.split("-")[0]&.split("#")
-      ticket_number = ticket_parts&.[](1)&.strip
-
-      # Validate ticket number is numeric
-      if ticket_number.nil? || !ticket_number.match?(/\A\d+\z/)
-        return create_new_topic(subject, message, raw, cc)
-      end
-
-      # Use find_by to avoid RecordNotFound exception
+    # Check for reply format: [SiteName]#123-Topic Name
+    if subject =~ /\[#{Regexp.escape(sitename)}\]#(\d+)-/
+      ticket_number = $1
       topic = Topic.find_by(id: ticket_number)
-      if topic.nil?
-        return create_new_topic(subject, message, raw, cc)
-      end
 
-      # Fix #1: Authorization check - user must own the topic
-      if topic.user_id != @user.id
+      # Validate topic exists and user owns it
+      if topic.nil? || topic.user_id != @user.id
         return create_new_topic(subject, message, raw, cc)
       end
 

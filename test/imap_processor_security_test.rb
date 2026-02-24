@@ -46,6 +46,8 @@ class ImapProcessorSecurityTest < ActiveSupport::TestCase
   # ============================================
 
   test "malformed subject with sitename but nothing after does not crash" do
+    topic_count_before = Topic.count
+
     mail = Mail.new do
       from    'user@example.com'
       to      'support@example.com'
@@ -56,9 +58,15 @@ class ImapProcessorSecurityTest < ActiveSupport::TestCase
     assert_nothing_raised do
       ImapProcessor.new(mail).process
     end
+
+    # Verify new topic was created (not a crash/no-op)
+    assert_equal topic_count_before + 1, Topic.count
+    assert_equal '[TestSite]', Topic.last.name
   end
 
   test "malformed subject with sitename but no hash does not crash" do
+    topic_count_before = Topic.count
+
     mail = Mail.new do
       from    'user@example.com'
       to      'support@example.com'
@@ -69,9 +77,15 @@ class ImapProcessorSecurityTest < ActiveSupport::TestCase
     assert_nothing_raised do
       ImapProcessor.new(mail).process
     end
+
+    # Verify new topic was created
+    assert_equal topic_count_before + 1, Topic.count
+    assert_equal '[TestSite]no-hash-here', Topic.last.name
   end
 
   test "malformed subject with sitename and hash but no number does not crash" do
+    topic_count_before = Topic.count
+
     mail = Mail.new do
       from    'user@example.com'
       to      'support@example.com'
@@ -82,6 +96,10 @@ class ImapProcessorSecurityTest < ActiveSupport::TestCase
     assert_nothing_raised do
       ImapProcessor.new(mail).process
     end
+
+    # Verify new topic was created
+    assert_equal topic_count_before + 1, Topic.count
+    assert_equal '[TestSite]#-missing-number', Topic.last.name
   end
 
   # ============================================
