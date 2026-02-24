@@ -9,10 +9,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
     AppSettings['settings.site_name'] = 'TestSite'
     AppSettings['settings.google_analytics_enabled'] = '0'
     AppSettings['cloudinary.enabled'] = '0'
+
+    # Clear tracking for blackbox assertions
+    UserMailer.clear_deliveries
+    PostNotificationSubscriber.clear_notifications
   end
 
   def teardown
     AppSettings.clear
+    UserMailer.clear_deliveries
+    PostNotificationSubscriber.clear_notifications
   end
 
   # ============================================
@@ -22,6 +28,7 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
   test "new email creates topic and post" do
     topic_count_before = Topic.count
     post_count_before = Post.count
+    notifications_before = PostNotificationSubscriber.notifications.count
 
     mail = Mail.new do
       from    'newuser@example.com'
@@ -30,14 +37,23 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Please help me with this issue'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: notification was sent
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent for new post"
+
+    # Greybox: verify database state
     assert_equal topic_count_before + 1, Topic.count, "Should create one topic"
     assert_equal post_count_before + 1, Post.count, "Should create one post"
   end
 
   test "new email from unknown address creates user" do
     user_count_before = User.count
+    emails_before = UserMailer.deliveries.count
 
     mail = Mail.new do
       from    'brandnew@example.com'
@@ -46,14 +62,23 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Hello'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: welcome email was sent
+    assert_equal emails_before + 1, UserMailer.deliveries.count,
+      "Welcome email should be sent to new user"
+
+    # Greybox: verify database state
     assert_equal user_count_before + 1, User.count, "Should create new user"
     assert User.find_by(email: 'brandnew@example.com'), "User should exist"
   end
 
   test "new email from existing user does not create duplicate user" do
     user_count_before = User.count
+    emails_before = UserMailer.deliveries.count
 
     mail = Mail.new do
       from    'existing@example.com'
@@ -62,8 +87,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Hello again'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: no welcome email sent (user already exists)
+    assert_equal emails_before, UserMailer.deliveries.count,
+      "No welcome email should be sent for existing user"
+
+    # Greybox: verify database state
     assert_equal user_count_before, User.count, "Should not create duplicate user"
   end
 
@@ -105,6 +138,7 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
     initial_post = topic.posts.create!(body: 'Initial question', user: @existing_user, kind: 'first')
 
     posts_before = topic.posts.count
+    notifications_before = PostNotificationSubscriber.notifications.count
     topic_id = topic.id
 
     mail = Mail.new do
@@ -114,8 +148,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Here is my reply'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: notification was sent for reply
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent for reply"
+
+    # Greybox: verify database state
     topic.reload
     assert_equal posts_before + 1, topic.posts.count, "Owner should be able to reply"
   end
@@ -162,6 +204,7 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
 
   test "forwarded email creates new topic" do
     topic_count_before = Topic.count
+    notifications_before = PostNotificationSubscriber.notifications.count
 
     mail = Mail.new do
       from    'user@example.com'
@@ -170,8 +213,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Forwarding this issue'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: notification was sent
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent for forwarded email"
+
+    # Greybox: verify database state
     assert_equal topic_count_before + 1, Topic.count
     topic = Topic.last
     assert_equal 'Fwd: Customer complaint', topic.name
@@ -196,6 +247,8 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
   # ============================================
 
   test "plus syntax routes to team" do
+    notifications_before = PostNotificationSubscriber.notifications.count
+
     mail = Mail.new do
       from    'user@example.com'
       to      'support+sales@example.com'
@@ -203,10 +256,17 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'About pricing'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: notification was sent
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent for team-routed email"
+
+    # Greybox: verify database state
     topic = Topic.last
-    # TeamList is a stub, so we just verify the code path runs without error
     assert topic.persisted?
   end
 
@@ -243,6 +303,8 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
   # ============================================
 
   test "email with attachment is processed" do
+    notifications_before = PostNotificationSubscriber.notifications.count
+
     mail = Mail.new do
       from    'user@example.com'
       to      'support@example.com'
@@ -251,11 +313,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
     end
     mail.attachments['document.pdf'] = 'PDF content here'
 
-    # Should not raise
+    # Blackbox: process completes without error
     assert_nothing_raised do
       ImapProcessor.new(mail).process
     end
 
+    # Blackbox: notification was sent
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent for email with attachment"
+
+    # Greybox: verify database state
     post = Post.last
     assert post.persisted?
   end
@@ -377,6 +444,8 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
   # ============================================
 
   test "display name is used for user name" do
+    emails_before = UserMailer.deliveries.count
+
     mail = Mail.new do
       from    'John Doe <johndoe@example.com>'
       to      'support@example.com'
@@ -384,13 +453,23 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Hello'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: welcome email was sent (new user)
+    assert_equal emails_before + 1, UserMailer.deliveries.count,
+      "Welcome email should be sent to new user"
+
+    # Greybox: verify database state
     user = User.find_by(email: 'johndoe@example.com')
     assert_equal 'John Doe', user.name
   end
 
   test "email is used when no display name" do
+    emails_before = UserMailer.deliveries.count
+
     mail = Mail.new do
       from    'nodisplay@example.com'
       to      'support@example.com'
@@ -398,8 +477,16 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body    'Hello'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
+    # Blackbox: welcome email was sent (new user)
+    assert_equal emails_before + 1, UserMailer.deliveries.count,
+      "Welcome email should be sent to new user"
+
+    # Greybox: verify database state
     user = User.find_by(email: 'nodisplay@example.com')
     # Name should be derived from email (alphanumeric only)
     assert user.name.present?
@@ -448,6 +535,9 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
   # ============================================
 
   test "Reply-To is used when FROM equals TO" do
+    emails_before = UserMailer.deliveries.count
+    notifications_before = PostNotificationSubscriber.notifications.count
+
     mail = Mail.new do
       from     'forwarder@example.com'
       to       'forwarder@example.com'
@@ -456,9 +546,20 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
       body     'Content'
     end
 
-    ImapProcessor.new(mail).process
+    # Blackbox: process completes without error
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
 
-    # Should use Reply-To address for the user
+    # Blackbox: welcome email was sent (new user from Reply-To)
+    assert_equal emails_before + 1, UserMailer.deliveries.count,
+      "Welcome email should be sent to new user from Reply-To"
+
+    # Blackbox: notification was sent
+    assert_equal notifications_before + 1, PostNotificationSubscriber.notifications.count,
+      "Notification should be sent"
+
+    # Greybox: verify database state
     user = User.find_by(email: 'original@example.com')
     assert user.present?, "User should be created from Reply-To address"
   end
