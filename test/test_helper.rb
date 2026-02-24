@@ -1,3 +1,13 @@
+# SimpleCov must be loaded before any application code
+require 'simplecov'
+SimpleCov.start 'rails' do
+  add_filter '/test/'
+  add_filter '/config/'
+  add_group 'Processor', 'lib/imap_processor.rb'
+  add_group 'Engine', 'lib/helpy_imap'
+  minimum_coverage 80
+end
+
 # Configure Rails Environment
 ENV["RAILS_ENV"] = "test"
 
