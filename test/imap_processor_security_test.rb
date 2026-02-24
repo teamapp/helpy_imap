@@ -1,7 +1,7 @@
 require 'test_helper'
 require 'imap_processor'
 
-class ImapProcessorTest < ActiveSupport::TestCase
+class ImapProcessorSecurityTest < ActiveSupport::TestCase
   def setup
     @forum = Forum.create!(name: 'Support')
     @owner = User.create!(email: 'owner@example.com', name: 'Owner', password: 'password')
