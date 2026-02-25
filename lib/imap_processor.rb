@@ -27,10 +27,15 @@ class ImapProcessor
     subject = @email.subject || "(No Subject)"
     attachments = @email.attachments
 
-    if subject.include?("[#{sitename}]") # this is a reply to an existing topic
-      complete_subject = subject.split("[#{sitename}]")[1].strip
-      ticket_number = complete_subject.split("-")[0].split("#")[1].strip
-      topic = Topic.find(ticket_number)
+    # Check for reply format: [SiteName]#123-Topic Name
+    if subject =~ /\[#{Regexp.escape(sitename)}\]#(\d+)-/
+      ticket_number = $1
+      topic = Topic.find_by(id: ticket_number)
+
+      # Validate topic exists and user owns it
+      if topic.nil? || topic.user_id != @user.id
+        return create_new_topic(subject, message, raw, cc)
+      end
 
       #insert post to new topic
       message = "Attachments:" if @email.attachments.present? && @email.body.blank?
@@ -83,37 +88,7 @@ class ImapProcessor
         @tracker.event(category: "Agent: Unassigned", action: "Forwarded New", label: topic.to_param)
       end
     else # this is a new direct message
-      topic = Forum.first.topics.create(:name => subject, :user_id => @user.id, :private => true)
-
-      if get_to_from_mail.include?("+")
-        topic.team_list.add(get_to_from_mail.split('+')[1])
-        topic.save
-      elsif get_to_from_mail != 'support'
-        topic.team_list.add(get_to_from_mail)
-        topic.save
-      end
-
-      #insert post to new topic
-      message = "Attachments:" if @email.attachments.present? && @email.body.blank?
-      post = topic.posts.create(
-        :body => encode_entity(message),
-        :raw_email => encode_entity(raw),
-        :user_id => @user.id,
-        :cc => cc,
-        :kind => "first"
-      )
-
-      # Send notification via the new controller-based pattern
-      PostNotificationSubscriber.notify(post) if post.persisted?
-
-      # Push array of attachments and send to Cloudinary
-      handle_attachments(@email, post)
-
-      # Call to GA
-      if @tracker
-        @tracker.event(category: "Email", action: "Inbound", label: "New Topic", non_interactive: true)
-        @tracker.event(category: "Agent: Unassigned", action: "New", label: topic.to_param)
-      end
+      create_new_topic(subject, message, raw, cc)
     end
   end
 
@@ -133,22 +108,70 @@ class ImapProcessor
     end
   end
 
+  # Extracted method for creating new topics (used for fallback when reply parsing fails)
+  def create_new_topic(subject, message, raw, cc)
+    topic = Forum.first.topics.create(:name => subject, :user_id => @user.id, :private => true)
+
+    if get_to_from_mail.include?("+")
+      topic.team_list.add(get_to_from_mail.split('+')[1])
+      topic.save
+    elsif get_to_from_mail != 'support'
+      topic.team_list.add(get_to_from_mail)
+      topic.save
+    end
+
+    message = "Attachments:" if @email.attachments.present? && @email.body.blank?
+    post = topic.posts.create(
+      :body => encode_entity(message),
+      :raw_email => encode_entity(raw),
+      :user_id => @user.id,
+      :cc => cc,
+      :kind => "first"
+    )
+
+    PostNotificationSubscriber.notify(post) if post.persisted?
+    handle_attachments(@email, post)
+
+    if @tracker
+      @tracker.event(category: "Email", action: "Inbound", label: "New Topic", non_interactive: true)
+      @tracker.event(category: "Agent: Unassigned", action: "New", label: topic.to_param)
+    end
+  end
+
+  # Fix #6: Redact email addresses in logs to protect PII
+  def redact_email(email)
+    return nil if email.nil?
+    parts = email.split('@')
+    return email if parts.length != 2
+    prefix = parts[0].length > 3 ? parts[0][0..2] : parts[0][0]
+    "#{prefix}***@#{parts[1]}"
+  end
+
   # Convert Mail::Part attachments (filename, body.decoded, mime_type) to UploadedFile objects for CarrierWave
+  # Fix #10: Track tempfiles and close them after processing
   def handle_attachments(email, post)
     return unless email.attachments.present?
 
-    uploaded_files = email.attachments.map do |attachment|
+    results = email.attachments.map do |attachment|
       convert_mail_attachment_to_uploaded_file(attachment)
     end.compact
 
-    return if uploaded_files.empty?
+    return if results.empty?
 
-    if cloudinary_enabled?
-      post.screenshots = uploaded_files
-    else
-      post.attachments = uploaded_files
+    uploaded_files = results.map { |r| r[:uploaded_file] }
+    tempfiles = results.map { |r| r[:tempfile] }
+
+    begin
+      if cloudinary_enabled?
+        post.screenshots = uploaded_files
+      else
+        post.attachments = uploaded_files
+      end
+      post.save
+    ensure
+      # Close all tempfiles to prevent resource leaks
+      tempfiles.each { |tf| tf.close unless tf.closed? }
     end
-    post.save
   end
 
   def convert_mail_attachment_to_uploaded_file(attachment)
@@ -159,11 +182,14 @@ class ImapProcessor
     tempfile.write(attachment.body.decoded)
     tempfile.rewind
 
-    ActionDispatch::Http::UploadedFile.new(
+    uploaded_file = ActionDispatch::Http::UploadedFile.new(
       filename: attachment.filename,
       type: attachment.mime_type,
       tempfile: tempfile
     )
+
+    # Return both the uploaded file and tempfile for cleanup
+    { uploaded_file: uploaded_file, tempfile: tempfile }
   end
 
   def cloudinary_enabled?
@@ -221,7 +247,7 @@ class ImapProcessor
     # If FROM and TO are the same (email forwarding loop), use Reply-To instead
     if to_address.present? && from_address.downcase == to_address.downcase && @email.reply_to.present?
       reply_to_address = @email[:reply_to]&.addrs&.first&.address
-      Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{from_address}, TO=#{to_address}, using REPLY-TO=#{reply_to_address}"
+      Rails.logger.info "[ImapProcessor] Forwarding detected: FROM=#{redact_email(from_address)}, TO=#{redact_email(to_address)}, using REPLY-TO=#{redact_email(reply_to_address)}"
       reply_to_address
     else
       from_address

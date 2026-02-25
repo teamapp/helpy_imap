@@ -14,3 +14,7 @@ gemspec
 # gem 'byebug', group: [:development, :test]
 
 gem 'deface'
+
+group :test do
+  gem 'simplecov', require: false
+end
