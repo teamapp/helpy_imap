@@ -530,6 +530,33 @@ class ImapProcessorHappyPathTest < ActiveSupport::TestCase
     assert post.body.include?('é'), "Accented characters should be preserved"
   end
 
+  test "ISO-8859-1 content is converted to UTF-8" do
+    # Create content that is:
+    # 1. ASCII-8BIT encoded (raw bytes)
+    # 2. Invalid as UTF-8 (incomplete multi-byte sequence)
+    # 3. Valid as ISO-8859-1
+    # This triggers the ISO-8859-1 fallback in encode_entity
+    # \xC2 alone is invalid UTF-8 (expects continuation byte)
+    # but valid in ISO-8859-1 (represents Â)
+    raw_content = "Test \xC2 content".b
+
+    mail = Mail.new do
+      from    'user@example.com'
+      to      'support@example.com'
+      subject 'ISO-8859-1 test'
+    end
+    mail.body = raw_content
+
+    assert_nothing_raised do
+      ImapProcessor.new(mail).process
+    end
+
+    post = Post.last
+    # \xC2 in ISO-8859-1 = 'Â' (Latin capital A with circumflex)
+    assert post.body.include?('Â'), "ISO-8859-1 byte 0xC2 should convert to UTF-8 'Â'"
+    assert_equal "Test Â content", post.body, "Full content should be correctly converted"
+  end
+
   # ============================================
   # ## Happy Path: Forwarding Detection
   # ============================================
